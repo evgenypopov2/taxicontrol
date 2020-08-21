@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:context="http://www.springframework.org/schema/context">
+
+    <!-- Annotation-based beans -->
+    <context:component-scan base-package="ru.otus.taxicontrol"/>
+    <bean id="cubaDataSource_taxi" class="com.haulmont.cuba.core.sys.CubaDataSourceFactoryBean">
+        <property name="storeName" value="taxi"/>
+    </bean>
+    <bean id="entityManagerFactory_taxi" class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean"
+          lazy-init="false">
+        <property name="persistenceXmlLocation" value="file:${cuba.dataDir}/taxi-persistence.xml"/>
+        <property name="dataSource" ref="cubaDataSource_taxi"/>
+        <property name="jpaVendorAdapter" ref="jpaVendorAdapter"/>
+    </bean>
+    <bean id="transactionManager_taxi" class="org.springframework.orm.jpa.JpaTransactionManager">
+        <property name="entityManagerFactory" ref="entityManagerFactory_taxi"/>
+        <property name="dataSource" ref="cubaDataSource_taxi"/>
+        <qualifier type="org.springframework.beans.factory.annotation.Qualifier" value="taxi"/>
+    </bean>
+    <bean id="cubaDataSource_route" class="com.haulmont.cuba.core.sys.CubaDataSourceFactoryBean">
+        <property name="storeName" value="route"/>
+    </bean>
+    <bean id="entityManagerFactory_route" class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean"
+          lazy-init="false">
+        <property name="persistenceXmlLocation" value="file:${cuba.dataDir}/route-persistence.xml"/>
+        <property name="dataSource" ref="cubaDataSource_route"/>
+        <property name="jpaVendorAdapter" ref="jpaVendorAdapter"/>
+    </bean>
+    <bean id="transactionManager_route" class="org.springframework.orm.jpa.JpaTransactionManager">
+        <property name="entityManagerFactory" ref="entityManagerFactory_route"/>
+        <property name="dataSource" ref="cubaDataSource_route"/>
+        <qualifier type="org.springframework.beans.factory.annotation.Qualifier" value="route"/>
+    </bean>
+    <bean id="cubaDataSource_client" class="com.haulmont.cuba.core.sys.CubaDataSourceFactoryBean">
+        <property name="storeName" value="client"/>
+    </bean>
+    <bean id="entityManagerFactory_client" class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean"
+          lazy-init="false">
+        <property name="persistenceXmlLocation" value="file:${cuba.dataDir}/client-persistence.xml"/>
+        <property name="dataSource" ref="cubaDataSource_client"/>
+        <property name="jpaVendorAdapter" ref="jpaVendorAdapter"/>
+    </bean>
+    <bean id="transactionManager_client" class="org.springframework.orm.jpa.JpaTransactionManager">
+        <property name="entityManagerFactory" ref="entityManagerFactory_client"/>
+        <property name="dataSource" ref="cubaDataSource_client"/>
+        <qualifier type="org.springframework.beans.factory.annotation.Qualifier" value="client"/>
+    </bean>
+
+</beans>

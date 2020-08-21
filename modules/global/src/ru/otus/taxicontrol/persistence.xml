@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<persistence xmlns="http://java.sun.com/xml/ns/persistence" version="2.0">
+    <persistence-unit name="taxicontrol" transaction-type="RESOURCE_LOCAL">
+
+        <class>ru.otus.taxicontrol.entity.Client</class>
+        <class>ru.otus.taxicontrol.entity.Route</class>
+        <class>ru.otus.taxicontrol.entity.RouteCost</class>
+        <class>ru.otus.taxicontrol.entity.Taxi</class>
+        <class>ru.otus.taxicontrol.entity.TaxiModel</class>
+        <class>ru.otus.taxicontrol.entity.TaxiVendor</class>
+    </persistence-unit>
+</persistence>

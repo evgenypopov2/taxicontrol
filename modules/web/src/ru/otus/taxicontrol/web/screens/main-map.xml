@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<window xmlns="http://schemas.haulmont.com/cuba/screen/window.xsd"
+        xmlns:maps="http://schemas.haulmont.com/maps/0.1/ui-component.xsd"
+        caption="msg://mainMap.caption"
+        messagesPack="ru.otus.taxicontrol.web.screens">
+    <layout>
+        <maps:geoMap id="map" height="100%" width="100%" center="-99.755859, 39.164141" zoom="4">
+            <maps:layers>
+                <maps:tile id="tiles"
+                           tileProvider="maps_OpenStreetMap"/>
+            </maps:layers>
+        </maps:geoMap>
+    </layout>
+</window>
