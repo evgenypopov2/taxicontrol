@@ -1,6 +1,8 @@
 package ru.otus.taxicontrol.entity;
 
 import com.haulmont.cuba.core.entity.StandardEntity;
+import ru.otus.common.model.TaxiType;
+//import ru.otus.common.model.TaxiType;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;

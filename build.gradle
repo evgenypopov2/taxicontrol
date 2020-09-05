@@ -16,7 +16,7 @@ buildscript {
                         rootProject['premiumRepoPass'] : System.getenv('CUBA_PREMIUM_PASSWORD'))
             }
         }
-
+        mavenLocal()
     }
     dependencies {
         classpath "com.haulmont.gradle:cuba-plugin:$cubaVersion"
@@ -40,6 +40,9 @@ cuba {
         group = 'ru.otus.taxicontrol'
         version = '0.1'
         isSnapshot = true
+    }
+    tomcat {
+        port = '8079'
     }
 }
 
@@ -80,6 +83,7 @@ configure([globalModule, coreModule, webModule, webToolkitModule, portalModule])
 configure(globalModule) {
     dependencies {
         if (!JavaVersion.current().isJava8()) {
+            compile('ru.otus:common:1.0.0')
             runtime('javax.xml.bind:jaxb-api:2.3.1')
             runtime('org.glassfish.jaxb:jaxb-runtime:2.3.1')
         }
@@ -104,7 +108,6 @@ configure(coreModule) {
         compileOnly(servletApi)
         jdbc(hsql)
         testRuntime(hsql)
-        jdbc('org.postgresql:postgresql:42.2.9')
     }
 
     task cleanConf(description: 'Cleans up conf directory', type: Delete) {
@@ -121,14 +124,6 @@ configure(coreModule) {
 
     task updateDb(dependsOn: assembleDbScripts, description: 'Updates local database', type: CubaDbUpdate) {
     }
-    task createDb_taxi(dependsOn: assembleDbScripts, description: 'Creates additional database - taxi', type: CubaDbCreation) {
-        storeName = 'taxi'
-    }
-    task updateDb_taxi(dependsOn: assembleDbScripts, description: 'Updates additional database - taxi', type: CubaDbUpdate) {
-        storeName = 'taxi'
-    }
-    task createAllDb(dependsOn: [createDb, createDb_taxi])
-    task updateAllDb(dependsOn: [updateDb, updateDb_taxi])
 }
 
 configure(webModule) {
@@ -139,6 +134,9 @@ configure(webModule) {
     dependencies {
         compileOnly(servletApi)
         compile(globalModule)
+        compile('org.springframework:spring-websocket:5.2.8.RELEASE')
+        compile('org.springframework:spring-messaging:5.2.8.RELEASE')
+        compile('ru.otus:common:1.0.0')
     }
 
     jar {
