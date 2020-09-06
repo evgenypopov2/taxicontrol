@@ -11,6 +11,10 @@ import com.haulmont.cuba.gui.Dialogs;
 import com.haulmont.cuba.gui.Notifications;
 import com.haulmont.cuba.gui.components.*;
 import com.haulmont.cuba.gui.components.Timer;
+import com.haulmont.cuba.gui.executors.BackgroundTask;
+import com.haulmont.cuba.gui.executors.BackgroundTaskHandler;
+import com.haulmont.cuba.gui.executors.BackgroundWorker;
+import com.haulmont.cuba.gui.executors.TaskLifeCycle;
 import com.haulmont.cuba.gui.icons.CubaIcon;
 import com.haulmont.cuba.gui.screen.Screen;
 import com.haulmont.cuba.gui.screen.Subscribe;
@@ -19,6 +23,7 @@ import com.haulmont.cuba.gui.screen.UiDescriptor;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.CoordinateXY;
 import org.locationtech.jts.geom.LineString;
+import org.locationtech.jts.geom.Point;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -36,6 +41,8 @@ import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -90,6 +97,8 @@ public class MainMap extends Screen {
 
     private CarInfoDTO carInfoDTO = null;
 
+    @Inject
+    protected BackgroundWorker backgroundWorker;
     @Inject
     private Dialogs dialogs;
     @Inject
@@ -515,13 +524,15 @@ public class MainMap extends Screen {
         for (RoutePartDTO routePartDTO: route.getRouteParts()) {
             coordinates[i++] = new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat());
         }
-        final LineString polyline = GeometryUtils.getGeometryFactory().createLineString(coordinates);
+        final LineString polylineString = GeometryUtils.getGeometryFactory().createLineString(coordinates);
         final CanvasLayer canvas = map.getCanvas();
-        return canvas.addPolyline(polyline)
+        CanvasLayer.Polyline polyline = canvas.addPolyline(polylineString)
                 .setStyle(new PolylineStyle()
                         .setStrokeColor("#0068A3")
                         .setStrokeWeight(3)
                         .setStrokeOpacity(0.5));
+        map.zoomToGeometry(polyline.getGeometry());
+        return polyline;
     }
 
     public void onClientOrderTaxiButtonClick() {
@@ -586,6 +597,7 @@ public class MainMap extends Screen {
             taxiStartPoint = addPoint(startLon, startLat, taxiMap, clientPointStyle);
             taxiEndPoint = addPoint(endLon, endLat, taxiMap, null);
             taxiRoute = drawRoute(taxiMap, route);
+            taxiMap.zoomToGeometry(taxiRoute.getGeometry());
             taxiClientOrderDesc.setValue(clientOrderDescription(startLat, startLon, endLat, endLon, route.getLength()));
             taxiClientOrderPrice.setValue("Price: " + orderForTaxi.getRoute().getPrices().get(0).getPrice());
             taxiWaitingForClientPanel.setVisible(false);
@@ -610,6 +622,7 @@ public class MainMap extends Screen {
                     .withPosition(Notifications.Position.BOTTOM_RIGHT)
                     .show();
             taxiClientOrderButtonsPanel.setVisible(false);
+            executeTaxiMoving();
         } else {
             notifications.create(Notifications.NotificationType.WARNING)
                     .withCaption("It's too late")
@@ -617,6 +630,59 @@ public class MainMap extends Screen {
                     .show();
             taxiReturnToWait();
         }
+    }
+
+    private void executeTaxiMoving() {
+        double speed = 16.67; // m/sec = 60 km/hour
+        double startX = taxiPoint.getGeometry().getX();
+        double startY = taxiPoint.getGeometry().getY();
+        double endX = taxiStartPoint.getGeometry().getX();
+        double endY = taxiStartPoint.getGeometry().getY();
+        double distance = calcDistance(startX, startY, endX, endY);
+        long steps = Math.round(distance/speed);
+        double stepX = (endX-startX)/steps;
+        double stepY = (endY-startY)/steps;
+
+        BackgroundTask<CoordinateXY, Void> task = new BackgroundTask<CoordinateXY, Void>(1000, this) {
+            @Override
+            public Void run(TaskLifeCycle<CoordinateXY> taskLifeCycle) throws Exception {
+                double x = startX;
+                double y = startY;
+                for (long i = 0; i < steps; i++) {
+                    TimeUnit.SECONDS.sleep(1); // time consuming computations
+                    taskLifeCycle.publish(new CoordinateXY(x += stepX, y += stepY));
+                }
+                TimeUnit.SECONDS.sleep(1); // time consuming computations
+                return null;
+            }
+            @Override
+            public void canceled() {
+            }
+            @Override
+            public void done(Void result) {
+                taxiPoint = movePoint(taxiMap,
+                        new CoordinateXY(taxiStartPoint.getGeometry().getCoordinate().getX(),
+                                taxiStartPoint.getGeometry().getCoordinate().getY()),
+                        taxiPoint, taxiPointStyle);
+            }
+            @Override
+            public void progress(List<CoordinateXY> changes) {
+                taxiPoint = movePoint(taxiMap, changes.get(changes.size() - 1), taxiPoint, taxiPointStyle);
+            }
+        };
+        // Get task handler object and run the task
+        BackgroundTaskHandler<Void> taskHandler = backgroundWorker.handle(task);
+        taskHandler.execute();
+    }
+    private double calcDistance(double x1, double y1, double x2, double y2) {
+        return Math.sqrt(square(1000*(x1-x2)/COORDS_SHIFT_1KM_X) + square(1000*(y1-y2)/COORDS_SHIFT_1KM_Y));
+    }
+    private double square(double num) {
+        return num*num;
+    }
+    private synchronized CanvasLayer.Point movePoint(GeoMap map, CoordinateXY coordinateXY, CanvasLayer.Point point, PointStyle style) {
+        map.getCanvas().removePoint(point);
+        return addPoint(coordinateXY.getX(), coordinateXY.getY(), map, style);
     }
 
     private void taxiReturnToWait() {
@@ -672,6 +738,7 @@ public class MainMap extends Screen {
             driverPhoneLabel.setValue(orderResponseDTO.getDriverPhone());
             clientTaxiPoint = addPoint(orderResponseDTO.getLocationLon(), orderResponseDTO.getLocationLat(),
                     clientMap, taxiPointStyle);
+            clientMap.zoomToBounds(clientPoint.getGeometry(), clientTaxiPoint.getGeometry());
             clientTaxiInfoPanel.setVisible(true);
         }
     }
