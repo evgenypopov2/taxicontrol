@@ -23,7 +23,6 @@ import com.haulmont.cuba.gui.screen.UiDescriptor;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.CoordinateXY;
 import org.locationtech.jts.geom.LineString;
-import org.locationtech.jts.geom.Point;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -41,7 +40,6 @@ import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -203,6 +201,8 @@ public class MainMap extends Screen {
     private TextField<String> clientRegPhoneField;
     @Inject
     private TextField<String> clientRegEmailField;
+    @Inject
+    private Timer clientGetTaxiLocationTimer;
 
     @Subscribe
     public void onBeforeShow(BeforeShowEvent event) {
@@ -215,16 +215,16 @@ public class MainMap extends Screen {
         clientPointStyle = new PointStyle();
         clientPointStyle.setIcon(new FontPointIcon(CubaIcon.USER));
         clientMap.addLayer(tileLayer);
-        clientPoint = addPoint(randomDouble(37.346812, 37.873610), randomDouble(55.571049, 55.910419), clientMap, clientPointStyle);
+        clientPoint = addPoint(clientMap, randomDouble(37.346812, 37.873610), randomDouble(55.571049, 55.910419), clientPointStyle);
         clientMap.setCenter(clientPoint.getGeometry().getX(), clientPoint.getGeometry().getY());
         clientMap.setZoomLevel(13);
 
         taxiPointStyle = new PointStyle();
         taxiPointStyle.setIcon(new FontPointIcon(CubaIcon.TAXI));
-        taxiPoint = addPoint(
+        taxiPoint = addPoint(taxiMap,
                 randomDouble(clientPoint.getGeometry().getX() - COORDS_SHIFT_1KM_X, clientPoint.getGeometry().getX() + COORDS_SHIFT_1KM_X),
                 randomDouble(clientPoint.getGeometry().getY() - COORDS_SHIFT_1KM_Y, clientPoint.getGeometry().getY() + COORDS_SHIFT_1KM_Y),
-                taxiMap, taxiPointStyle);
+                taxiPointStyle);
         taxiMap.setCenter(taxiPoint.getGeometry().getX(), taxiPoint.getGeometry().getY());
         taxiMap.setZoomLevel(13);
         taxiMap.addLayer(tileLayer);
@@ -252,7 +252,7 @@ public class MainMap extends Screen {
     }
 
     public void onClientLoginButtonClick() {
-        clientStompSessionHandler = new ClientStompSessionHandler(this::clientOrderHandler);
+        clientStompSessionHandler = new ClientStompSessionHandler(this::clientMessageHandler);
         clientAuth = loginAndGetToken(clientLoginField.getValue(), clientPasswordField.getValue(),
                 CLIENT_LOGIN_URL, CLIENT_WEBSOCKET_URL, clientStompSessionHandler);
         if (clientAuth != null) {
@@ -315,7 +315,7 @@ public class MainMap extends Screen {
     }
 
     public void onTaxiLoginButtonClick() {
-        taxiStompSessionHandler = new TaxiStompSessionHandler(this::taxiOrderHandler);
+        taxiStompSessionHandler = new TaxiStompSessionHandler(this::taxiMessageHandler);
         taxiAuth = loginAndGetToken(taxiLoginField.getValue(), taxiPasswordField.getValue(),
                 TAXI_LOGIN_URL, TAXI_WEBSOCKET_URL, taxiStompSessionHandler);
 
@@ -338,6 +338,10 @@ public class MainMap extends Screen {
         final TaxiLocationDTO taxiLocationDTO = new TaxiLocationDTO();
         taxiLocationDTO.setLocationLat(taxiPoint.getGeometry().getY());
         taxiLocationDTO.setLocationLon(taxiPoint.getGeometry().getX());
+
+        if (orderForTaxi != null) {
+            taxiLocationDTO.setPhone(orderForTaxi.getClientPhone());
+        }
 
         final RestTemplate restTemplate = new RestTemplate();
         final HttpHeaders headers = new HttpHeaders();
@@ -450,7 +454,7 @@ public class MainMap extends Screen {
         return Math.random() * (max - min) + min;
     }
 
-    private CanvasLayer.Point addPoint(double longitude, double latitude, GeoMap map, PointStyle style) {
+    private CanvasLayer.Point addPoint(GeoMap map, double longitude, double latitude, PointStyle style) {
         CanvasLayer canvas = map.getCanvas();
         CanvasLayer.Point point = canvas.addPoint(GeometryUtils.createPoint(longitude, latitude))
                 .setEditable(true);
@@ -463,7 +467,7 @@ public class MainMap extends Screen {
     @Subscribe("clientMap")
     public void onMapClick(GeoMap.ClickEvent event) {
         if (clientAuth != null && clientDestinationPoint == null) {
-            clientDestinationPoint = addPoint(event.getPoint().getX(), event.getPoint().getY(), clientMap, null);
+            clientDestinationPoint = addPoint(clientMap, event.getPoint().getX(), event.getPoint().getY(), null);
             sendOrderRequest(clientPoint.getGeometry().getY(), clientPoint.getGeometry().getX(),
                     clientDestinationPoint.getGeometry().getY(), clientDestinationPoint.getGeometry().getX());
         }
@@ -585,7 +589,7 @@ public class MainMap extends Screen {
     }
 
     @Subscribe("taxiWaitForOrderTimer")
-    public void onTaxiWaitForOrderTimerTimerAction(Timer.TimerActionEvent event) throws InterruptedException {
+    public void onTaxiWaitForOrderTimerAction(Timer.TimerActionEvent event) throws InterruptedException {
         orderForTaxi = getClientOrderForTaxi();
         if (orderForTaxi != null) {
             taxiWaitForOrderTimer.stop();
@@ -594,8 +598,8 @@ public class MainMap extends Screen {
             double startLon = route.getRouteParts().get(0).getLon();
             double endLat = route.getRouteParts().get(route.getRouteParts().size() - 1).getLat();
             double endLon = route.getRouteParts().get(route.getRouteParts().size() - 1).getLon();
-            taxiStartPoint = addPoint(startLon, startLat, taxiMap, clientPointStyle);
-            taxiEndPoint = addPoint(endLon, endLat, taxiMap, null);
+            taxiStartPoint = addPoint(taxiMap, startLon, startLat, clientPointStyle);
+            taxiEndPoint = addPoint(taxiMap, endLon, endLat, null);
             taxiRoute = drawRoute(taxiMap, route);
             taxiMap.zoomToGeometry(taxiRoute.getGeometry());
             taxiClientOrderDesc.setValue(clientOrderDescription(startLat, startLon, endLat, endLon, route.getLength()));
@@ -615,17 +619,26 @@ public class MainMap extends Screen {
         headers.setBearerAuth(taxiAuth.getToken());
         final TaxiTakeOrderDTO taxiTakeOrderDTO = new TaxiTakeOrderDTO(orderForTaxi.getOrderId());
         final HttpEntity<TaxiTakeOrderDTO> request = new HttpEntity<>(taxiTakeOrderDTO, headers);
-        String response = restTemplate.postForObject(TAXI_TAKE_ORDER_URL, request, String.class);
-        if ("OK".equals(response)) {
-            notifications.create(Notifications.NotificationType.TRAY)
-                    .withCaption("Order taken OK")
-                    .withPosition(Notifications.Position.BOTTOM_RIGHT)
-                    .show();
-            taxiClientOrderButtonsPanel.setVisible(false);
-            executeTaxiMoving();
+        TaxiTakeOrderDTO response = restTemplate.postForObject(TAXI_TAKE_ORDER_URL, request, TaxiTakeOrderDTO.class);
+        if (response != null) {
+            if (response.getOrderId() != null) {
+                notifications.create(Notifications.NotificationType.TRAY)
+                        .withCaption("Order taken OK")
+                        .withPosition(Notifications.Position.BOTTOM_RIGHT)
+                        .show();
+                orderForTaxi.setClientPhone(response.getPhone());
+                taxiClientOrderButtonsPanel.setVisible(false);
+                executeTaxiMoving();
+            } else {
+                notifications.create(Notifications.NotificationType.WARNING)
+                        .withCaption("It's too late")
+                        .withPosition(Notifications.Position.BOTTOM_RIGHT)
+                        .show();
+                taxiReturnToWait();
+            }
         } else {
-            notifications.create(Notifications.NotificationType.WARNING)
-                    .withCaption("It's too late")
+            notifications.create(Notifications.NotificationType.ERROR)
+                    .withCaption("Error taking order")
                     .withPosition(Notifications.Position.BOTTOM_RIGHT)
                     .show();
             taxiReturnToWait();
@@ -664,10 +677,12 @@ public class MainMap extends Screen {
                         new CoordinateXY(taxiStartPoint.getGeometry().getCoordinate().getX(),
                                 taxiStartPoint.getGeometry().getCoordinate().getY()),
                         taxiPoint, taxiPointStyle);
+                sendTaxiLocation();
             }
             @Override
             public void progress(List<CoordinateXY> changes) {
                 taxiPoint = movePoint(taxiMap, changes.get(changes.size() - 1), taxiPoint, taxiPointStyle);
+                sendTaxiLocation();
             }
         };
         // Get task handler object and run the task
@@ -680,9 +695,13 @@ public class MainMap extends Screen {
     private double square(double num) {
         return num*num;
     }
-    private synchronized CanvasLayer.Point movePoint(GeoMap map, CoordinateXY coordinateXY, CanvasLayer.Point point, PointStyle style) {
+    private synchronized CanvasLayer.Point movePoint(GeoMap map, double lon, double lat, CanvasLayer.Point point, PointStyle style) {
+        return movePoint(map, new CoordinateXY(lon, lat), point, style);
+    }
+    private synchronized CanvasLayer.Point movePoint(GeoMap map, CoordinateXY coordinateXY,
+                                                     CanvasLayer.Point point, PointStyle style) {
         map.getCanvas().removePoint(point);
-        return addPoint(coordinateXY.getX(), coordinateXY.getY(), map, style);
+        return addPoint(map, coordinateXY.getX(), coordinateXY.getY(), style);
     }
 
     private void taxiReturnToWait() {
@@ -724,7 +743,7 @@ public class MainMap extends Screen {
     }
 
     @Subscribe("clientWaitForTaxiTimer")
-    public void onClientWaitForTaxiTimerTimerAction(Timer.TimerActionEvent event) {
+    public void onClientWaitForTaxiTimerAction(Timer.TimerActionEvent event) {
         OrderOrderResponseDTO orderResponseDTO = getClientOrderOrder();
         if (orderResponseDTO != null) {
             clientWaitForTaxiTimer.stop();
@@ -736,17 +755,27 @@ public class MainMap extends Screen {
             carNumberLabel.setValue(orderResponseDTO.getCarNumber());
             driverNameLabel.setValue(orderResponseDTO.getDriverName());
             driverPhoneLabel.setValue(orderResponseDTO.getDriverPhone());
-            clientTaxiPoint = addPoint(orderResponseDTO.getLocationLon(), orderResponseDTO.getLocationLat(),
-                    clientMap, taxiPointStyle);
+            clientTaxiPoint = addPoint(clientMap, orderResponseDTO.getLocationLon(), orderResponseDTO.getLocationLat(),
+                    taxiPointStyle);
             clientMap.zoomToBounds(clientPoint.getGeometry(), clientTaxiPoint.getGeometry());
             clientTaxiInfoPanel.setVisible(true);
+            clientGetTaxiLocationTimer.start();
+        }
+    }
+
+    @Subscribe("clientGetTaxiLocationTimer")
+    public void onClientGetTaxiLocationTimerTimerAction(Timer.TimerActionEvent event) {
+        OrderOrderResponseDTO orderResponseDTO = getClientOrderOrder();
+        if (orderResponseDTO != null) {
+            clientTaxiPoint = movePoint(clientMap, orderResponseDTO.getLocationLon(), orderResponseDTO.getLocationLat(),
+                    clientTaxiPoint, taxiPointStyle);
         }
     }
 
     // methods for parsing of incoming websocket messages
 
     @SuppressWarnings("unchecked")
-    private String clientOrderHandler(Object clientOrder) {
+    private String clientMessageHandler(Object clientOrder) {
         Map<String, Object> clientOrderMap = (Map<String, Object>) clientOrder;
         OrderOrderResponseDTO orderResponseDTO = new OrderOrderResponseDTO();
         orderResponseDTO.setOrderId((Integer) clientOrderMap.get("orderId"));
@@ -764,10 +793,11 @@ public class MainMap extends Screen {
     }
 
     @SuppressWarnings("unchecked")
-    private String taxiOrderHandler(Object clientOrder) {
+    private String taxiMessageHandler(Object clientOrder) {
         Map<String, Object> clientOrderMap = (Map<String, Object>) clientOrder;
         ClientOrderForTaxiDTO clientOrderForTaxi = new ClientOrderForTaxiDTO();
         clientOrderForTaxi.setOrderId((Integer) clientOrderMap.get("orderId"));
+        clientOrderForTaxi.setClientPhone((String) clientOrderMap.get("clientPhone"));
         clientOrderForTaxi.setRoute(makeRoute((Map<String, Object>) clientOrderMap.get("route")));
         addClientOrderForTaxi(clientOrderForTaxi);
         return "Ok";
@@ -801,7 +831,9 @@ public class MainMap extends Screen {
         List<RoutePriceDTO> routePrices = new ArrayList<>();
         pricesList.forEach(v -> {
             Map<String, Object> priceMap = (Map<String, Object>) v;
-            routePrices.add(new RoutePriceDTO(str2TaxiType((String) priceMap.get("taxiType")), (Integer) priceMap.get("price")));
+            routePrices.add(
+                new RoutePriceDTO(str2TaxiType((String) priceMap.get("taxiType")), (Integer) priceMap.get("price"))
+            );
         });
         return routePrices;
     }

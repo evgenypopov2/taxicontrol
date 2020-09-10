@@ -7,6 +7,7 @@
         <timer id="taxiTimer" delay="60000" repeating="true"/>
         <timer id="taxiWaitForOrderTimer" delay="1000" repeating="true"/>
         <timer id="clientWaitForTaxiTimer" delay="1000" repeating="true"/>
+        <timer id="clientGetTaxiLocationTimer" delay="1000" repeating="true"/>
     </facets>
     <layout height="100%" width="100%" expand="topBox">
         <hbox id="topBox" spacing="true" width="100%">
