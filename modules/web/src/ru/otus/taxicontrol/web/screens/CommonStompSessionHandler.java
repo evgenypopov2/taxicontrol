@@ -29,11 +29,11 @@ public class CommonStompSessionHandler extends StompSessionHandlerAdapter {
     @Override
     public void afterConnected(StompSession session, StompHeaders connectedHeaders) {
         this.session = session;
+        logger.info("New websocket session established : " + session.getSessionId());
         for (String subscribePoint: subscribePoints) {
             session.subscribe(subscribePoint, this);
             logger.info("Subscribed to: " + subscribePoint);
         }
-        logger.info("New websocket session established : " + session.getSessionId());
     }
 
     @Override

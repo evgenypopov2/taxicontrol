@@ -5,7 +5,7 @@
         messagesPack="ru.otus.taxicontrol.web.screens">
     <facets>
         <timer id="taxiTimer" delay="60000" repeating="true"/>
-        <timer id="taxiWaitForOrderTimer" delay="1000" repeating="true"/>
+        <timer id="taxiWaitForMessageTimer" delay="1000" repeating="true"/>
         <timer id="clientWaitForTaxiTimer" delay="1000" repeating="true"/>
         <timer id="clientGetTaxiLocationTimer" delay="1000" repeating="true"/>
     </facets>
@@ -95,9 +95,9 @@
                             </row>
                         </rows>
                     </grid>
-                    <hbox spacing="true" align="TOP_CENTER">
-                        <button id="clientTaxiInfoOkButton" caption="Ok"/>
-                        <button id="clientTaxiInfoCancelButton" caption="Cancel"
+                    <hbox id="clientFinishCancelPanel" spacing="true" align="TOP_CENTER">
+                        <button id="clientFinishTripButton" caption="Finish trip"/>
+                        <button id="clientCancelOrderButton" caption="Cancel"
                                 invoke="onClientCancelOrderClick"/>
                     </hbox>
                 </vbox>
@@ -153,6 +153,10 @@
                 <vbox id="taxiClientOrderPanel" spacing="true" align="TOP_CENTER" visible="false">
                     <label id="taxiClientOrderDesc" align="TOP_CENTER"/>
                     <label id="taxiClientOrderPrice" align="TOP_CENTER"/>
+                    <hbox id="taxiTripStartCancelPanel" spacing="true" align="TOP_CENTER">
+                        <button id="taxiStartTripButton" caption="Start trip" invoke="onTaxiStartTripButtonClick"/>
+                        <button id="taxiCancelOrderButton" caption="Cancel"/>
+                    </hbox>
                     <hbox id="taxiClientOrderButtonsPanel" spacing="true" align="TOP_CENTER">
                         <button id="taxiTakeOrder" caption="Take order" invoke="onTaxiTakeOrderClick"/>
                         <button id="taxiIgnoreOrder" invoke="onTaxiIgnoreOrderClick" caption="Ignore"/>

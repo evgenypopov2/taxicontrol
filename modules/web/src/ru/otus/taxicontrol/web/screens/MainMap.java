@@ -44,6 +44,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static ru.otus.common.model.GeoConstants.COORDS_SHIFT_1KM_X;
+import static ru.otus.common.model.GeoConstants.COORDS_SHIFT_1KM_Y;
+
 @UiController("taxicontrol_MainMap")
 @UiDescriptor("main-map.xml")
 public class MainMap extends Screen {
@@ -66,18 +69,18 @@ public class MainMap extends Screen {
     private static final String TAXI_LOCATION_URL = SERVER_REST_URL + "/taxi/location";
     private static final String TAXI_TAKE_ORDER_URL = SERVER_REST_URL + "/taxi/take-order";
 
-    private static final double COORDS_SHIFT_1KM_X = 0.015879D;
-    private static final double COORDS_SHIFT_1KM_Y = 0.008951D;
-
     private AuthResponseDTO clientAuth = null;
     private AuthResponseDTO taxiAuth = null;
-    private OrderRequestResponseDTO clientOrderRequest = null;
 
+    private OrderRequestResponseDTO clientOrderRequest = null;
     private OrderOrderResponseDTO clientOrderOrder = null;
+    private OrderOrderResponseDTO clientReceivedOrderOrder = null;
+    private TaxiLocationDTO clientReceivedTaxiLocation = null;
+
     private CommonStompSessionHandler clientStompSessionHandler;
     private TaxiStompSessionHandler taxiStompSessionHandler;
 
-    private final BlockingQueue<ClientOrderForTaxiDTO> clientOrderForTaxiList = new ArrayBlockingQueue<>(10);
+    private final BlockingQueue<Object> messageForTaxiQueue = new ArrayBlockingQueue<>(10);
     private ClientOrderForTaxiDTO orderForTaxi = null;
 
     private CanvasLayer.Point clientPoint;
@@ -94,6 +97,7 @@ public class MainMap extends Screen {
     private PointStyle taxiPointStyle;
 
     private CarInfoDTO carInfoDTO = null;
+    private BackgroundTaskHandler<Void> taxiMoveTaskHandler;
 
     @Inject
     protected BackgroundWorker backgroundWorker;
@@ -140,7 +144,7 @@ public class MainMap extends Screen {
     @Inject
     private VBoxLayout clientWaitForTaxiPanel;
     @Inject
-    private Timer taxiWaitForOrderTimer;
+    private Timer taxiWaitForMessageTimer;
     @Inject
     private VBoxLayout taxiClientOrderPanel;
     @Inject
@@ -203,6 +207,12 @@ public class MainMap extends Screen {
     private TextField<String> clientRegEmailField;
     @Inject
     private Timer clientGetTaxiLocationTimer;
+    @Inject
+    private HBoxLayout taxiTripStartCancelPanel;
+    @Inject
+    private Button taxiStartTripButton;
+    @Inject
+    private Button clientFinishTripButton;
 
     @Subscribe
     public void onBeforeShow(BeforeShowEvent event) {
@@ -230,20 +240,28 @@ public class MainMap extends Screen {
         taxiMap.addLayer(tileLayer);
     }
 
-    public synchronized ClientOrderForTaxiDTO getClientOrderForTaxi() throws InterruptedException {
-        return clientOrderForTaxiList.size() > 0 ? clientOrderForTaxiList.take() : null;
+    public synchronized Object getMessageForTaxi() throws InterruptedException {
+        return messageForTaxiQueue.size() > 0 ? messageForTaxiQueue.take() : null;
     }
 
-    public synchronized void addClientOrderForTaxi(ClientOrderForTaxiDTO clientOrderForTaxi) {
-        this.clientOrderForTaxiList.offer(clientOrderForTaxi);
+    public synchronized void addMessageForTaxi(Object messageForTaxi) {
+        this.messageForTaxiQueue.offer(messageForTaxi);
     }
 
     public synchronized OrderOrderResponseDTO getClientOrderOrder() {
-        return clientOrderOrder;
+        return clientReceivedOrderOrder;
     }
 
     public synchronized void setClientOrderOrder(OrderOrderResponseDTO clientOrderOrder) {
-        this.clientOrderOrder = clientOrderOrder;
+        this.clientReceivedOrderOrder = clientOrderOrder;
+    }
+
+    public synchronized TaxiLocationDTO getTaxiLocation() {
+        return clientReceivedTaxiLocation;
+    }
+
+    public synchronized void setTaxiLocation(TaxiLocationDTO taxiLocationDTO) {
+        this.clientReceivedTaxiLocation = taxiLocationDTO;
     }
 
     public void onClientConnectClick() {
@@ -324,7 +342,7 @@ public class MainMap extends Screen {
             taxiLoginPanel.setVisible(false);
             taxiWaitingForClientPanel.setVisible(true);
             taxiTimer.start();
-            taxiWaitForOrderTimer.start();
+            taxiWaitForMessageTimer.start();
             sendTaxiLocation();
         }
     }
@@ -454,7 +472,7 @@ public class MainMap extends Screen {
         return Math.random() * (max - min) + min;
     }
 
-    private CanvasLayer.Point addPoint(GeoMap map, double longitude, double latitude, PointStyle style) {
+    private synchronized CanvasLayer.Point addPoint(GeoMap map, double longitude, double latitude, PointStyle style) {
         CanvasLayer canvas = map.getCanvas();
         CanvasLayer.Point point = canvas.addPoint(GeometryUtils.createPoint(longitude, latitude))
                 .setEditable(true);
@@ -588,11 +606,13 @@ public class MainMap extends Screen {
         }
     }
 
-    @Subscribe("taxiWaitForOrderTimer")
-    public void onTaxiWaitForOrderTimerAction(Timer.TimerActionEvent event) throws InterruptedException {
-        orderForTaxi = getClientOrderForTaxi();
-        if (orderForTaxi != null) {
-            taxiWaitForOrderTimer.stop();
+    @Subscribe("taxiWaitForMessageTimer")
+    public void onTaxiWaitForMessageTimerAction(Timer.TimerActionEvent event) throws InterruptedException {
+        Object messageForTaxi = getMessageForTaxi();
+
+        if (messageForTaxi instanceof ClientOrderForTaxiDTO) {
+            orderForTaxi = (ClientOrderForTaxiDTO) messageForTaxi;
+            //taxiWaitForOrderTimer.stop();
             RouteDTO route = orderForTaxi.getRoute();
             double startLat = route.getRouteParts().get(0).getLat();
             double startLon = route.getRouteParts().get(0).getLon();
@@ -606,6 +626,14 @@ public class MainMap extends Screen {
             taxiClientOrderPrice.setValue("Price: " + orderForTaxi.getRoute().getPrices().get(0).getPrice());
             taxiWaitingForClientPanel.setVisible(false);
             taxiClientOrderPanel.setVisible(true);
+            taxiClientOrderButtonsPanel.setVisible(true);
+            taxiTripStartCancelPanel.setVisible(false);
+        } else if (messageForTaxi instanceof OrderCancelDTO) {
+            taxiReturnToWait();
+            notifications.create(Notifications.NotificationType.TRAY)
+                    .withCaption("Order cancelled by client")
+                    .withPosition(Notifications.Position.BOTTOM_RIGHT)
+                    .show();
         }
     }
 
@@ -628,6 +656,8 @@ public class MainMap extends Screen {
                         .show();
                 orderForTaxi.setClientPhone(response.getPhone());
                 taxiClientOrderButtonsPanel.setVisible(false);
+                taxiTripStartCancelPanel.setVisible(true);
+                taxiStartTripButton.setEnabled(false);
                 executeTaxiMoving();
             } else {
                 notifications.create(Notifications.NotificationType.WARNING)
@@ -662,6 +692,9 @@ public class MainMap extends Screen {
                 double x = startX;
                 double y = startY;
                 for (long i = 0; i < steps; i++) {
+                    if (taskLifeCycle.isCancelled()) {
+                        return null;
+                    }
                     TimeUnit.SECONDS.sleep(1); // time consuming computations
                     taskLifeCycle.publish(new CoordinateXY(x += stepX, y += stepY));
                 }
@@ -670,14 +703,17 @@ public class MainMap extends Screen {
             }
             @Override
             public void canceled() {
+                taxiMoveTaskHandler = null;
             }
             @Override
             public void done(Void result) {
+                taxiStartTripButton.setEnabled(true);
                 taxiPoint = movePoint(taxiMap,
                         new CoordinateXY(taxiStartPoint.getGeometry().getCoordinate().getX(),
                                 taxiStartPoint.getGeometry().getCoordinate().getY()),
                         taxiPoint, taxiPointStyle);
                 sendTaxiLocation();
+                taxiMoveTaskHandler = null;
             }
             @Override
             public void progress(List<CoordinateXY> changes) {
@@ -686,22 +722,77 @@ public class MainMap extends Screen {
             }
         };
         // Get task handler object and run the task
-        BackgroundTaskHandler<Void> taskHandler = backgroundWorker.handle(task);
-        taskHandler.execute();
+        taxiMoveTaskHandler = backgroundWorker.handle(task);
+        taxiMoveTaskHandler.execute();
     }
+
     private double calcDistance(double x1, double y1, double x2, double y2) {
         return Math.sqrt(square(1000*(x1-x2)/COORDS_SHIFT_1KM_X) + square(1000*(y1-y2)/COORDS_SHIFT_1KM_Y));
     }
+
     private double square(double num) {
         return num*num;
     }
+
     private synchronized CanvasLayer.Point movePoint(GeoMap map, double lon, double lat, CanvasLayer.Point point, PointStyle style) {
         return movePoint(map, new CoordinateXY(lon, lat), point, style);
     }
+
     private synchronized CanvasLayer.Point movePoint(GeoMap map, CoordinateXY coordinateXY,
                                                      CanvasLayer.Point point, PointStyle style) {
         map.getCanvas().removePoint(point);
         return addPoint(map, coordinateXY.getX(), coordinateXY.getY(), style);
+    }
+
+    public void onTaxiStartTripButtonClick() {
+
+        BackgroundTask<CoordinateXY, Void> task = new BackgroundTask<CoordinateXY, Void>(1000, this) {
+            @Override
+            public Void run(TaskLifeCycle<CoordinateXY> taskLifeCycle) throws Exception {
+                for (int i = 0; i < orderForTaxi.getRoute().getRouteParts().size(); i++) {
+                    if (taskLifeCycle.isCancelled()) {
+                        return null;
+                    }
+                    TimeUnit.SECONDS.sleep(1); // time consuming computations
+                    RoutePartDTO routePartDTO = orderForTaxi.getRoute().getRouteParts().get(i);
+                    taskLifeCycle.publish(new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()));
+                }
+                TimeUnit.SECONDS.sleep(1); // time consuming computations
+                return null;
+            }
+            @Override
+            public void canceled() {
+                taxiMoveTaskHandler = null;
+            }
+            @Override
+            public void done(Void result) {
+                RoutePartDTO routePartDTO = orderForTaxi.getRoute().getRouteParts().get(orderForTaxi.getRoute().getRouteParts().size() - 1);
+
+                taxiPoint = movePoint(taxiMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
+                        taxiPoint, taxiPointStyle);
+                taxiStartPoint = movePoint(taxiMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
+                        taxiStartPoint, clientPointStyle);
+
+                clientPoint = movePoint(clientMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
+                        clientPoint, clientPointStyle);
+                /*clientTaxiPoint = movePoint(clientMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
+                        clientTaxiPoint, taxiPointStyle);*/
+
+                sendTaxiLocation();
+                taxiMoveTaskHandler = null;
+            }
+            @Override
+            public void progress(List<CoordinateXY> changes) {
+                taxiPoint = movePoint(taxiMap, changes.get(changes.size() - 1), taxiPoint, taxiPointStyle);
+                taxiStartPoint = movePoint(taxiMap, changes.get(changes.size() - 1), taxiStartPoint, clientPointStyle);
+                sendTaxiLocation();
+                clientPoint = movePoint(clientMap, changes.get(changes.size() - 1),
+                        clientPoint, clientPointStyle);
+            }
+        };
+        // Get task handler object and run the task
+        taxiMoveTaskHandler = backgroundWorker.handle(task);
+        taxiMoveTaskHandler.execute();
     }
 
     private void taxiReturnToWait() {
@@ -711,7 +802,7 @@ public class MainMap extends Screen {
         taxiMap.getCanvas().removePolyline(taxiRoute);
         taxiClientOrderPanel.setVisible(false);
         taxiWaitingForClientPanel.setVisible(true);
-        taxiWaitForOrderTimer.start();
+        //taxiWaitForOrderTimer.start();
     }
 
     public void onClientCancelOrderClick() {
@@ -720,7 +811,9 @@ public class MainMap extends Screen {
                 .withMessage("Are you sure to cancel order?")
                 .withActions(
                         new DialogAction(DialogAction.Type.YES, Action.Status.PRIMARY).withHandler(e -> {
+                            sendCancelOrder();
                             clientWaitForTaxiTimer.stop();
+                            clientGetTaxiLocationTimer.stop();
                             if (clientDestinationPoint != null) {
                                 clientMap.getCanvas().removePoint(clientDestinationPoint);
                                 clientDestinationPoint = null;
@@ -736,70 +829,121 @@ public class MainMap extends Screen {
                             clientWaitForTaxiPanel.setVisible(false);
                             clientTaxiInfoPanel.setVisible(false);
                             clientSelectDestinationPointPanel.setVisible(true);
+
+                            notifications.create(Notifications.NotificationType.TRAY)
+                                    .withCaption("Order cancelled")
+                                    .withPosition(Notifications.Position.BOTTOM_CENTER)
+                                    .show();
                         }),
                         new DialogAction(DialogAction.Type.NO)
                 )
                 .show();
     }
 
+    private void sendCancelOrder() {
+        if (clientOrderOrder != null) {
+            final OrderCancelDTO orderCancelDTO = new OrderCancelDTO(clientOrderOrder.getOrderId(), clientAuth.getPhone());
+            clientOrderOrder = null;
+            final RestTemplate restTemplate = new RestTemplate();
+            final HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(clientAuth.getToken());
+            final HttpEntity<OrderCancelDTO> request = new HttpEntity<>(orderCancelDTO, headers);
+            restTemplate.postForObject(CLIENT_ORDER_CANCEL_URL, request, String.class);
+        }
+    }
+
     @Subscribe("clientWaitForTaxiTimer")
     public void onClientWaitForTaxiTimerAction(Timer.TimerActionEvent event) {
         OrderOrderResponseDTO orderResponseDTO = getClientOrderOrder();
         if (orderResponseDTO != null) {
-            clientWaitForTaxiTimer.stop();
             setClientOrderOrder(null);
+            clientWaitForTaxiTimer.stop();
+            clientOrderOrder = orderResponseDTO;
             clientWaitForTaxiPanel.setVisible(false);
-            carBrandLabel.setValue(orderResponseDTO.getCarVendor());
-            carModelLabel.setValue(orderResponseDTO.getCarModel());
-            carColorLabel.setValue(orderResponseDTO.getCarColor());
-            carNumberLabel.setValue(orderResponseDTO.getCarNumber());
-            driverNameLabel.setValue(orderResponseDTO.getDriverName());
-            driverPhoneLabel.setValue(orderResponseDTO.getDriverPhone());
-            clientTaxiPoint = addPoint(clientMap, orderResponseDTO.getLocationLon(), orderResponseDTO.getLocationLat(),
+            carBrandLabel.setValue(clientOrderOrder.getCarVendor());
+            carModelLabel.setValue(clientOrderOrder.getCarModel());
+            carColorLabel.setValue(clientOrderOrder.getCarColor());
+            carNumberLabel.setValue(clientOrderOrder.getCarNumber());
+            driverNameLabel.setValue(clientOrderOrder.getDriverName());
+            driverPhoneLabel.setValue(clientOrderOrder.getDriverPhone());
+            clientTaxiPoint = addPoint(clientMap, clientOrderOrder.getLocationLon(), clientOrderOrder.getLocationLat(),
                     taxiPointStyle);
             clientMap.zoomToBounds(clientPoint.getGeometry(), clientTaxiPoint.getGeometry());
             clientTaxiInfoPanel.setVisible(true);
+            clientFinishTripButton.setEnabled(false);
             clientGetTaxiLocationTimer.start();
         }
     }
 
     @Subscribe("clientGetTaxiLocationTimer")
     public void onClientGetTaxiLocationTimerTimerAction(Timer.TimerActionEvent event) {
-        OrderOrderResponseDTO orderResponseDTO = getClientOrderOrder();
-        if (orderResponseDTO != null) {
-            clientTaxiPoint = movePoint(clientMap, orderResponseDTO.getLocationLon(), orderResponseDTO.getLocationLat(),
-                    clientTaxiPoint, taxiPointStyle);
+        TaxiLocationDTO taxiLocationDTO = getTaxiLocation();
+        if (taxiLocationDTO != null) {
+            setTaxiLocation(null);
+            if (clientTaxiPoint != null) {
+                double lat = taxiLocationDTO.getLocationLat();
+                double lon = taxiLocationDTO.getLocationLon();
+                clientTaxiPoint = movePoint(clientMap, lon, lat, clientTaxiPoint, taxiPointStyle);
+                if (calcDistance(clientPoint.getGeometry().getX(), clientPoint.getGeometry().getY(), lon, lat) < 20) {
+                    clientFinishTripButton.setEnabled(true);
+                }
+            }
         }
     }
 
     // methods for parsing of incoming websocket messages
 
     @SuppressWarnings("unchecked")
-    private String clientMessageHandler(Object clientOrder) {
-        Map<String, Object> clientOrderMap = (Map<String, Object>) clientOrder;
-        OrderOrderResponseDTO orderResponseDTO = new OrderOrderResponseDTO();
-        orderResponseDTO.setOrderId((Integer) clientOrderMap.get("orderId"));
-        orderResponseDTO.setLocationLat((Double) clientOrderMap.get("locationLat"));
-        orderResponseDTO.setLocationLon((Double) clientOrderMap.get("locationLon"));
-        orderResponseDTO.setCarType((String) clientOrderMap.get("carType"));
-        orderResponseDTO.setCarModel((String) clientOrderMap.get("carModel"));
-        orderResponseDTO.setCarVendor((String) clientOrderMap.get("carVendor"));
-        orderResponseDTO.setCarColor((String) clientOrderMap.get("carColor"));
-        orderResponseDTO.setCarNumber((String) clientOrderMap.get("carNumber"));
-        orderResponseDTO.setDriverName((String) clientOrderMap.get("driverName"));
-        orderResponseDTO.setDriverPhone((String) clientOrderMap.get("driverPhone"));
-        setClientOrderOrder(orderResponseDTO);
+    private String clientMessageHandler(Object message) {
+        Map<String, Object> messageMap = (Map<String, Object>) message;
+        String messageClass = (String) messageMap.get("messageClass");
+
+        if (OrderOrderResponseDTO.class.getSimpleName().equals(messageClass)) {    // it's order message
+            OrderOrderResponseDTO orderResponseDTO = new OrderOrderResponseDTO();
+            orderResponseDTO.setOrderId(Long.valueOf((Integer) messageMap.get("orderId")));
+            orderResponseDTO.setLocationLat((Double) messageMap.get("locationLat"));
+            orderResponseDTO.setLocationLon((Double) messageMap.get("locationLon"));
+            orderResponseDTO.setCarType((String) messageMap.get("carType"));
+            orderResponseDTO.setCarModel((String) messageMap.get("carModel"));
+            orderResponseDTO.setCarVendor((String) messageMap.get("carVendor"));
+            orderResponseDTO.setCarColor((String) messageMap.get("carColor"));
+            orderResponseDTO.setCarNumber((String) messageMap.get("carNumber"));
+            orderResponseDTO.setDriverName((String) messageMap.get("driverName"));
+            orderResponseDTO.setDriverPhone((String) messageMap.get("driverPhone"));
+            setClientOrderOrder(orderResponseDTO);
+        } else if (TaxiLocationDTO.class.getSimpleName().equals(messageClass)) {
+            TaxiLocationDTO taxiLocationDTO = new TaxiLocationDTO(
+                    (Double) messageMap.get("locationLat"),
+                    (Double) messageMap.get("locationLon")
+            );
+            setTaxiLocation(taxiLocationDTO);
+        }
         return "Ok";
     }
 
     @SuppressWarnings("unchecked")
-    private String taxiMessageHandler(Object clientOrder) {
-        Map<String, Object> clientOrderMap = (Map<String, Object>) clientOrder;
-        ClientOrderForTaxiDTO clientOrderForTaxi = new ClientOrderForTaxiDTO();
-        clientOrderForTaxi.setOrderId((Integer) clientOrderMap.get("orderId"));
-        clientOrderForTaxi.setClientPhone((String) clientOrderMap.get("clientPhone"));
-        clientOrderForTaxi.setRoute(makeRoute((Map<String, Object>) clientOrderMap.get("route")));
-        addClientOrderForTaxi(clientOrderForTaxi);
+    private String taxiMessageHandler(Object message) {
+        Map<String, Object> messageMap = (Map<String, Object>) message;
+        String messageClass = (String) messageMap.get("messageClass");
+        Long orderId = Long.valueOf((Integer) messageMap.get("orderId"));
+
+        if (ClientOrderForTaxiDTO.class.getSimpleName().equals(messageClass)) {    // order message
+            ClientOrderForTaxiDTO clientOrderForTaxi = new ClientOrderForTaxiDTO();
+            clientOrderForTaxi.setOrderId(orderId);
+            clientOrderForTaxi.setClientPhone((String) messageMap.get("clientPhone"));
+            clientOrderForTaxi.setRoute(makeRoute((Map<String, Object>) messageMap.get("route")));
+            addMessageForTaxi(clientOrderForTaxi);
+        } else if (OrderCancelDTO.class.getSimpleName().equals(messageClass)) {    // cancel order message
+            String phone = (String) messageMap.get("phone");
+            if (orderForTaxi != null && orderForTaxi.getOrderId().equals(orderId)
+                    && orderForTaxi.getClientPhone().equals(phone)) {
+                OrderCancelDTO orderCancelDTO = new OrderCancelDTO(orderId, phone);
+                addMessageForTaxi(orderCancelDTO);
+                if (taxiMoveTaskHandler != null) {
+                    taxiMoveTaskHandler.cancel();
+                }
+            }
+        }
         return "Ok";
     }
 
@@ -832,7 +976,7 @@ public class MainMap extends Screen {
         pricesList.forEach(v -> {
             Map<String, Object> priceMap = (Map<String, Object>) v;
             routePrices.add(
-                new RoutePriceDTO(str2TaxiType((String) priceMap.get("taxiType")), (Integer) priceMap.get("price"))
+                new RoutePriceDTO(str2TaxiType((String) priceMap.get("taxiType")), Long.valueOf((Integer) priceMap.get("price")))
             );
         });
         return routePrices;
