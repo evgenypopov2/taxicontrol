@@ -34,6 +34,7 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 import ru.otus.common.dto.*;
 import ru.otus.common.model.TaxiColor;
+import ru.otus.common.model.TaxiStatus;
 import ru.otus.common.model.TaxiType;
 
 import javax.inject.Inject;
@@ -68,6 +69,7 @@ public class MainMap extends Screen {
     private static final String TAXI_LOGIN_URL = SERVER_REST_URL + "/taxi/auth";
     private static final String TAXI_LOCATION_URL = SERVER_REST_URL + "/taxi/location";
     private static final String TAXI_TAKE_ORDER_URL = SERVER_REST_URL + "/taxi/take-order";
+    private static final String TAXI_STATUS_URL = SERVER_REST_URL + "/taxi/status";
 
     private AuthResponseDTO clientAuth = null;
     private AuthResponseDTO taxiAuth = null;
@@ -212,7 +214,13 @@ public class MainMap extends Screen {
     @Inject
     private Button taxiStartTripButton;
     @Inject
-    private Button clientFinishTripButton;
+    private Label<String> taxiWaitForTripEnd;
+    @Inject
+    private Button clientCancelOrderButton;
+    @Inject
+    private HBoxLayout clientFinishCancelPanel;
+    @Inject
+    private HBoxLayout clientWaitForTripEnd;
 
     @Subscribe
     public void onBeforeShow(BeforeShowEvent event) {
@@ -656,6 +664,7 @@ public class MainMap extends Screen {
                         .show();
                 orderForTaxi.setClientPhone(response.getPhone());
                 taxiClientOrderButtonsPanel.setVisible(false);
+                taxiWaitForTripEnd.setVisible(false);
                 taxiTripStartCancelPanel.setVisible(true);
                 taxiStartTripButton.setEnabled(false);
                 executeTaxiMoving();
@@ -746,6 +755,9 @@ public class MainMap extends Screen {
 
     public void onTaxiStartTripButtonClick() {
 
+        taxiTripStartCancelPanel.setVisible(false);
+        taxiWaitForTripEnd.setVisible(true);
+
         BackgroundTask<CoordinateXY, Void> task = new BackgroundTask<CoordinateXY, Void>(1000, this) {
             @Override
             public Void run(TaskLifeCycle<CoordinateXY> taskLifeCycle) throws Exception {
@@ -766,28 +778,26 @@ public class MainMap extends Screen {
             }
             @Override
             public void done(Void result) {
-                RoutePartDTO routePartDTO = orderForTaxi.getRoute().getRouteParts().get(orderForTaxi.getRoute().getRouteParts().size() - 1);
+                RoutePartDTO lastRoutePartDTO = orderForTaxi.getRoute().getRouteParts().get(orderForTaxi.getRoute().getRouteParts().size() - 1);
+                CoordinateXY coordinateXY = new CoordinateXY(lastRoutePartDTO.getLon(), lastRoutePartDTO.getLat());
 
-                taxiPoint = movePoint(taxiMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
-                        taxiPoint, taxiPointStyle);
-                taxiStartPoint = movePoint(taxiMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
-                        taxiStartPoint, clientPointStyle);
+                taxiPoint = movePoint(taxiMap, coordinateXY, taxiPoint, taxiPointStyle);
+                taxiReturnToWait();
 
-                clientPoint = movePoint(clientMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
-                        clientPoint, clientPointStyle);
-                /*clientTaxiPoint = movePoint(clientMap, new CoordinateXY(routePartDTO.getLon(), routePartDTO.getLat()),
-                        clientTaxiPoint, taxiPointStyle);*/
+                clientPoint = movePoint(clientMap, coordinateXY, clientPoint, clientPointStyle);
+                clientReturnToOrder();
 
-                sendTaxiLocation();
                 taxiMoveTaskHandler = null;
             }
             @Override
             public void progress(List<CoordinateXY> changes) {
-                taxiPoint = movePoint(taxiMap, changes.get(changes.size() - 1), taxiPoint, taxiPointStyle);
-                taxiStartPoint = movePoint(taxiMap, changes.get(changes.size() - 1), taxiStartPoint, clientPointStyle);
-                sendTaxiLocation();
-                clientPoint = movePoint(clientMap, changes.get(changes.size() - 1),
-                        clientPoint, clientPointStyle);
+                CoordinateXY coordinateXY = changes.get(changes.size() - 1);
+
+                taxiStartPoint = movePoint(taxiMap, coordinateXY, taxiStartPoint, clientPointStyle);
+                taxiPoint = movePoint(taxiMap, coordinateXY, taxiPoint, taxiPointStyle);
+
+                clientTaxiPoint = movePoint(clientMap, coordinateXY, clientTaxiPoint, taxiPointStyle);
+                clientPoint = movePoint(clientMap, coordinateXY, clientPoint, clientPointStyle);
             }
         };
         // Get task handler object and run the task
@@ -802,7 +812,28 @@ public class MainMap extends Screen {
         taxiMap.getCanvas().removePolyline(taxiRoute);
         taxiClientOrderPanel.setVisible(false);
         taxiWaitingForClientPanel.setVisible(true);
-        //taxiWaitForOrderTimer.start();
+        sendTaxiStatus(TaxiStatus.FREE);
+    }
+
+    private void sendTaxiStatus(TaxiStatus status) {
+        final RestTemplate restTemplate = new RestTemplate();
+        final HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(taxiAuth.getToken());
+        final TaxiStatusDTO taxiStatusDTO = new TaxiStatusDTO(taxiAuth.getPhone(), status);
+        final HttpEntity<TaxiStatusDTO> request = new HttpEntity<>(taxiStatusDTO, headers);
+        restTemplate.postForObject(TAXI_STATUS_URL, request, String.class);
+    }
+
+    private void clientReturnToOrder() {
+        clientMap.getCanvas().removePoint(clientTaxiPoint);
+        clientMap.getCanvas().removePoint(clientDestinationPoint);
+        clientMap.getCanvas().removePolyline(clientRoute);
+        clientOrderRequest = null;
+        clientOrderOrder = null;
+        clientReceivedOrderOrder = null;
+        clientDestinationPoint = null;
+        clientTaxiInfoPanel.setVisible(false);
+        clientSelectDestinationPointPanel.setVisible(true);
     }
 
     public void onClientCancelOrderClick() {
@@ -870,7 +901,8 @@ public class MainMap extends Screen {
                     taxiPointStyle);
             clientMap.zoomToBounds(clientPoint.getGeometry(), clientTaxiPoint.getGeometry());
             clientTaxiInfoPanel.setVisible(true);
-            clientFinishTripButton.setEnabled(false);
+            clientFinishCancelPanel.setVisible(true);
+            clientWaitForTripEnd.setVisible(false);
             clientGetTaxiLocationTimer.start();
         }
     }
@@ -885,7 +917,8 @@ public class MainMap extends Screen {
                 double lon = taxiLocationDTO.getLocationLon();
                 clientTaxiPoint = movePoint(clientMap, lon, lat, clientTaxiPoint, taxiPointStyle);
                 if (calcDistance(clientPoint.getGeometry().getX(), clientPoint.getGeometry().getY(), lon, lat) < 20) {
-                    clientFinishTripButton.setEnabled(true);
+                    clientFinishCancelPanel.setVisible(false);
+                    clientWaitForTripEnd.setVisible(true);
                 }
             }
         }
@@ -990,5 +1023,8 @@ public class MainMap extends Screen {
             case "PREMIUM": return TaxiType.PREMIUM;
         }
         return null;
+    }
+
+    public void onTaxiCancelOrderButtonClick() {
     }
 }

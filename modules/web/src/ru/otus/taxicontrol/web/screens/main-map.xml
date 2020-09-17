@@ -96,9 +96,11 @@
                         </rows>
                     </grid>
                     <hbox id="clientFinishCancelPanel" spacing="true" align="TOP_CENTER">
-                        <button id="clientFinishTripButton" caption="Finish trip"/>
                         <button id="clientCancelOrderButton" caption="Cancel"
-                                invoke="onClientCancelOrderClick"/>
+                                invoke="onClientCancelOrderClick" align="TOP_CENTER"/>
+                    </hbox>
+                    <hbox id="clientWaitForTripEnd" spacing="true" align="TOP_CENTER">
+                        <label align="TOP_CENTER" value="Please wait for the trip end..."/>
                     </hbox>
                 </vbox>
             </vbox>
@@ -153,9 +155,11 @@
                 <vbox id="taxiClientOrderPanel" spacing="true" align="TOP_CENTER" visible="false">
                     <label id="taxiClientOrderDesc" align="TOP_CENTER"/>
                     <label id="taxiClientOrderPrice" align="TOP_CENTER"/>
+                    <label id="taxiWaitForTripEnd" visible="false" value="Please wait for the trip end..."
+                           align="TOP_CENTER"/>
                     <hbox id="taxiTripStartCancelPanel" spacing="true" align="TOP_CENTER">
                         <button id="taxiStartTripButton" caption="Start trip" invoke="onTaxiStartTripButtonClick"/>
-                        <button id="taxiCancelOrderButton" caption="Cancel"/>
+                        <button id="taxiCancelOrderButton" caption="Cancel" invoke="onTaxiCancelOrderButtonClick"/>
                     </hbox>
                     <hbox id="taxiClientOrderButtonsPanel" spacing="true" align="TOP_CENTER">
                         <button id="taxiTakeOrder" caption="Take order" invoke="onTaxiTakeOrderClick"/>
