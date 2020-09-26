@@ -1,8 +1,7 @@
 rootProject.name = 'taxicontrol'
 def modulePrefix = 'taxi'
-include(":${modulePrefix}-global", ":${modulePrefix}-core", ":${modulePrefix}-web", ":${modulePrefix}-web-toolkit", ":${modulePrefix}-portal")
+include(":${modulePrefix}-global", ":${modulePrefix}-core", ":${modulePrefix}-web", ":${modulePrefix}-web-toolkit")
 project(":${modulePrefix}-global").projectDir = new File(settingsDir, 'modules/global')
 project(":${modulePrefix}-core").projectDir = new File(settingsDir, 'modules/core')
 project(":${modulePrefix}-web").projectDir = new File(settingsDir, 'modules/web')
 project(":${modulePrefix}-web-toolkit").projectDir = new File(settingsDir, 'modules/web-toolkit')
-project(":${modulePrefix}-portal").projectDir = new File(settingsDir, 'modules/portal')

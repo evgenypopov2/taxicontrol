@@ -2,6 +2,7 @@ package ru.otus.taxicontrol.entity;
 
 import com.haulmont.chile.core.annotations.NamePattern;
 import com.haulmont.cuba.core.entity.StandardEntity;
+import ru.otus.common.model.TaxiType;
 
 import javax.persistence.*;
 

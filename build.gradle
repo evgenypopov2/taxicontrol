@@ -16,7 +16,7 @@ buildscript {
                         rootProject['premiumRepoPass'] : System.getenv('CUBA_PREMIUM_PASSWORD'))
             }
         }
-
+        mavenLocal()
     }
     dependencies {
         classpath "com.haulmont.gradle:cuba-plugin:$cubaVersion"
@@ -29,7 +29,6 @@ def globalModule = project(":${modulePrefix}-global")
 def coreModule = project(":${modulePrefix}-core")
 def webModule = project(":${modulePrefix}-web")
 def webToolkitModule = project(":${modulePrefix}-web-toolkit")
-def portalModule = project(":${modulePrefix}-portal")
 
 def servletApi = 'javax.servlet:javax.servlet-api:3.1.0'
 
@@ -41,6 +40,8 @@ cuba {
         version = '0.1'
         isSnapshot = true
     }
+    tomcat {
+        }
 }
 
 dependencies {
@@ -52,7 +53,7 @@ dependencies {
 
 def hsql = 'org.hsqldb:hsqldb:2.4.1'
 
-configure([globalModule, coreModule, webModule, webToolkitModule, portalModule]) {
+configure([globalModule, coreModule, webModule, webToolkitModule]) {
     apply(plugin: 'java')
     apply(plugin: 'maven')
     apply(plugin: 'cuba')
@@ -80,6 +81,7 @@ configure([globalModule, coreModule, webModule, webToolkitModule, portalModule])
 configure(globalModule) {
     dependencies {
         if (!JavaVersion.current().isJava8()) {
+            compile('ru.otus:common:1.0.0')
             runtime('javax.xml.bind:jaxb-api:2.3.1')
             runtime('org.glassfish.jaxb:jaxb-runtime:2.3.1')
         }
@@ -104,7 +106,6 @@ configure(coreModule) {
         compileOnly(servletApi)
         jdbc(hsql)
         testRuntime(hsql)
-        jdbc('org.postgresql:postgresql:42.2.9')
     }
 
     task cleanConf(description: 'Cleans up conf directory', type: Delete) {
@@ -121,14 +122,6 @@ configure(coreModule) {
 
     task updateDb(dependsOn: assembleDbScripts, description: 'Updates local database', type: CubaDbUpdate) {
     }
-    task createDb_taxi(dependsOn: assembleDbScripts, description: 'Creates additional database - taxi', type: CubaDbCreation) {
-        storeName = 'taxi'
-    }
-    task updateDb_taxi(dependsOn: assembleDbScripts, description: 'Updates additional database - taxi', type: CubaDbUpdate) {
-        storeName = 'taxi'
-    }
-    task createAllDb(dependsOn: [createDb, createDb_taxi])
-    task updateAllDb(dependsOn: [updateDb, updateDb_taxi])
 }
 
 configure(webModule) {
@@ -139,6 +132,9 @@ configure(webModule) {
     dependencies {
         compileOnly(servletApi)
         compile(globalModule)
+        compile('org.springframework:spring-websocket:5.2.8.RELEASE')
+        compile('org.springframework:spring-messaging:5.2.8.RELEASE')
+        compile('ru.otus:common:1.0.0')
     }
 
     jar {
@@ -211,67 +207,14 @@ configure(webToolkitModule) {
     }
 }
 
-configure(portalModule) {
-    dependencies {
-        compileOnly(servletApi)
-        compile(globalModule)
-    }
-
-    def webappName = "${modulePrefix}-portal"
-    def resourcesDir = "$cuba.tomcat.dir/webapps/$webappName/resources"
-    def ftlDir = "$cuba.tomcat.dir/webapps/$webappName/WEB-INF/templates"
-
-    task deploy(dependsOn: assemble, type: CubaDeployment) {
-        appName = webappName
-        appJars(modulePrefix + '-global', modulePrefix + '-portal')
-    }
-
-    task deployStatic() {
-        doLast {
-            copy {
-                from file('web/resources')
-                include '**/*.css'
-                include '**/*.js'
-                include '**/*.png'
-                include '**/*.gif'
-                include '**/*.jpg'
-                into resourcesDir
-            }
-            copy {
-                from file('web/WEB-INF/templates')
-                include '**/*.ftl'
-                into ftlDir
-            }
-        }
-    }
-
-    task cleanStatic() {
-        doLast {
-            delete resourcesDir
-            delete ftlDir
-        }
-    }
-
-    task webArchive(type: Zip) {
-        from file('web')
-        from file("$buildDir/web")
-        exclude '**/web.xml', '**/app.properties'
-        classifier = 'web'
-    }
-
-    artifacts {
-        archives webArchive
-    }
-}
 
 task undeploy(type: Delete, dependsOn: ":${modulePrefix}-web:cleanConf") {
     delete("$cuba.tomcat.dir/shared")
     delete("$cuba.tomcat.dir/webapps/${modulePrefix}-core")
     delete("$cuba.tomcat.dir/webapps/${modulePrefix}")
-    delete("$cuba.tomcat.dir/webapps/${modulePrefix}-portal")
 }
 
-task restart(dependsOn: ['stop', ":${modulePrefix}-core:deploy", ":${modulePrefix}-web:deploy", ":${modulePrefix}-web-toolkit:deploy", ":${modulePrefix}-portal:deploy"], description: 'Redeploys applications and restarts local Tomcat') {
+task restart(dependsOn: ['stop', ":${modulePrefix}-core:deploy", ":${modulePrefix}-web:deploy", ":${modulePrefix}-web-toolkit:deploy"], description: 'Redeploys applications and restarts local Tomcat') {
     doLast {
         ant.waitfor(maxwait: 6, maxwaitunit: 'second', checkevery: 2, checkeveryunit: 'second') {
             not {
@@ -279,6 +222,11 @@ task restart(dependsOn: ['stop', ":${modulePrefix}-core:deploy", ":${modulePrefi
             }
         }
     }
+}
+task buildWar(type: CubaWarBuilding) {
+    appProperties = ['cuba.automaticDatabaseUpdate': 'true']
+    singleWar = false
+    includeJdbcDriver = true
 }
 restart.finalizedBy start
 

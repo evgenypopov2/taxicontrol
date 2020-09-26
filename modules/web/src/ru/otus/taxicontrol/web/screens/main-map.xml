@@ -3,12 +3,170 @@
         xmlns:maps="http://schemas.haulmont.com/maps/0.1/ui-component.xsd"
         caption="msg://mainMap.caption"
         messagesPack="ru.otus.taxicontrol.web.screens">
-    <layout>
-        <maps:geoMap id="map" height="100%" width="100%" center="-99.755859, 39.164141" zoom="4">
-            <maps:layers>
-                <maps:tile id="tiles"
-                           tileProvider="maps_OpenStreetMap"/>
-            </maps:layers>
-        </maps:geoMap>
+    <facets>
+        <timer id="taxiTimer" delay="60000" repeating="true"/>
+        <timer id="taxiWaitForMessageTimer" delay="1000" repeating="true"/>
+        <timer id="clientWaitForTaxiTimer" delay="1000" repeating="true"/>
+        <timer id="clientGetTaxiLocationTimer" delay="1000" repeating="true"/>
+    </facets>
+    <layout height="100%" width="100%" expand="topBox">
+        <hbox id="topBox" spacing="true" width="100%">
+            <vbox spacing="true" id="clientMapBox" height="100%" width="100%" expand="clientMap">
+                <maps:geoMap id="clientMap" width="100%" height="100%">
+                    <maps:layers>
+                        <maps:tile id="clientTiles"
+                                   tileProvider="maps_OpenStreetMap"/>
+                    </maps:layers>
+                </maps:geoMap>
+                <vbox id="clientLoginPanel" spacing="true" visible="false">
+                    <textField id="clientLoginField" caption="Login" align="TOP_CENTER" required="true"/>
+                    <passwordField id="clientPasswordField" caption="Password" align="TOP_CENTER" required="true"/>
+                    <hbox spacing="true" align="TOP_CENTER">
+                        <button id="clientLoginButton" align="TOP_CENTER" icon="OK" caption="OK" invoke="onClientLoginButtonClick"/>
+                        <button id="clientCancelLoginButton" align="TOP_CENTER" icon="CANCEL" caption="Cancel"
+                                invoke="onClientCancelLoginButtonClick"/>
+                    </hbox>
+                </vbox>
+                <vbox id="clientRegisterPanel" spacing="true" visible="false">
+                    <textField id="clientRegLoginField" required="true" caption="Login" align="TOP_CENTER"/>
+                    <passwordField id="clientRegPassword1Field" caption="Password" align="TOP_CENTER" required="true"/>
+                    <passwordField id="clientRegPassword2Field" caption="Repeat password" align="TOP_CENTER" required="true"/>
+                    <textField id="clientRegFirstNameField" required="true" caption="First name" align="TOP_CENTER"/>
+                    <textField id="clientRegLastNameField" caption="Last name" align="TOP_CENTER"/>
+                    <textField id="clientRegPhoneField" required="true" caption="Phone" align="TOP_CENTER"/>
+                    <textField id="clientRegEmailField" caption="Email" align="TOP_CENTER"/>
+                    <hbox spacing="true" align="TOP_CENTER">
+                        <button id="clientRegOkButton" caption="Ok" icon="OK" invoke="onClientRegOkButtonClick"/>
+                        <button id="clientRegCancelButton" icon="CANCEL" caption="Cancel" invoke="onClientRegCancelButtonClick"/>
+                    </hbox>
+                </vbox>
+                <hbox id="clientConnectRegisterPanel" spacing="true" align="BOTTOM_CENTER">
+                    <button id="clientConnectButton" invoke="onClientConnectClick" icon="USER" caption="Login"/>
+                    <button id="clientRegisterButton" caption="Register" invoke="onClientRegisterButtonClick" icon="USER_PLUS"/>
+                </hbox>
+                <vbox id="clientOrderPanel" spacing="true" visible="false">
+                    <label id="clientOrderRequestDescription" align="TOP_CENTER"/>
+                    <lookupField id="clientSelectTaxiTypeField" align="TOP_CENTER" nullOptionVisible="false"
+                                 nullName="Select option" inputPrompt="Select option" required="true"/>
+                    <hbox spacing="true" align="TOP_CENTER">
+                        <button id="clientOrderTaxiButton" caption="Order" invoke="onClientOrderTaxiButtonClick"/>
+                        <button id="clientCancelOrderTaxiButton" caption="Cancel"
+                                invoke="onClientCancelOrderTaxiButtonClick"/>
+                    </hbox>
+                </vbox>
+                <vbox id="clientSelectDestinationPointPanel" spacing="true" visible="false">
+                    <label value="Select destination point" align="TOP_CENTER"/>
+                </vbox>
+                <vbox id="clientWaitForTaxiPanel" spacing="true" visible="false" align="TOP_CENTER">
+                    <label value="Waiting for taxi..." align="TOP_CENTER"/>
+                    <button id="clientCancelOrder" align="TOP_CENTER" caption="Cancel"
+                            invoke="onClientCancelOrderClick"/>
+                </vbox>
+                <vbox id="clientTaxiInfoPanel" visible="false" align="TOP_CENTER">
+                    <hbox align="TOP_CENTER">
+                        <label value="Your taxi:"/>
+                    </hbox>
+                    <grid spacing="true" align="TOP_CENTER">
+                        <columns count="2"/>
+                        <rows>
+                            <row>
+                                <label value="Car brand"/>
+                                <label id="carBrandLabel"/>
+                            </row>
+                            <row>
+                                <label value="Car model"/>
+                                <label id="carModelLabel"/>
+                            </row>
+                            <row>
+                                <label value="Car color"/>
+                                <label id="carColorLabel"/>
+                            </row>
+                            <row>
+                                <label value="Car number"/>
+                                <label id="carNumberLabel"/>
+                            </row>
+                            <row>
+                                <label value="Driver name"/>
+                                <label id="driverNameLabel"/>
+                            </row>
+                            <row>
+                                <label value="Driver phone"/>
+                                <label id="driverPhoneLabel"/>
+                            </row>
+                        </rows>
+                    </grid>
+                    <hbox id="clientFinishCancelPanel" spacing="true" align="TOP_CENTER">
+                        <button id="clientCancelOrderButton" caption="Cancel"
+                                invoke="onClientCancelOrderClick" align="TOP_CENTER"/>
+                    </hbox>
+                    <hbox id="clientWaitForTripEnd" spacing="true" align="TOP_CENTER">
+                        <label align="TOP_CENTER" value="Please wait for the trip end..."/>
+                    </hbox>
+                </vbox>
+            </vbox>
+            <vbox id="taxiMapBox" spacing="true" height="100%" expand="taxiMap">
+                <maps:geoMap id="taxiMap" width="100%" height="100%">
+                    <maps:layers>
+                        <maps:tile id="taxiTiles"
+                                   tileProvider="maps_OpenStreetMap"/>
+                    </maps:layers>
+                </maps:geoMap>
+                <vbox id="taxiLoginPanel" spacing="true" visible="false">
+                    <textField id="taxiLoginField" caption="Login" align="TOP_CENTER" required="true"/>
+                    <passwordField id="taxiPasswordField" caption="Password" align="TOP_CENTER" required="true"/>
+                    <hbox spacing="true" align="TOP_CENTER">
+                        <button id="taxiLoginButton" align="TOP_CENTER" icon="OK" caption="OK"
+                                invoke="onTaxiLoginButtonClick"/>
+                        <button id="taxiCancelLoginButton" align="TOP_CENTER" icon="CANCEL" caption="Cancel"
+                                invoke="onTaxiCancelLoginButtonClick"/>
+                    </hbox>
+                </vbox>
+                <vbox id="taxiRegisterPanel" spacing="true" visible="false" align="TOP_CENTER">
+                    <scrollBox height="100%" align="TOP_CENTER" width="100%" spacing="true">
+                        <textField id="taxiRegLoginField" required="true" caption="Login" align="TOP_CENTER"/>
+                        <passwordField id="taxiRegPassword1Field" caption="Password" align="TOP_CENTER" required="true"/>
+                        <passwordField id="taxiRegPassword2Field" caption="Repeat password" align="TOP_CENTER" required="true"/>
+                        <textField id="taxiRegFirstNameField" required="true" caption="First name" align="TOP_CENTER"/>
+                        <textField id="taxiRegLastNameField" caption="Last name" align="TOP_CENTER"/>
+                        <textField id="taxiRegPhoneField" required="true" caption="Phone" align="TOP_CENTER"/>
+                        <textField id="taxiRegEmailField" caption="Email" align="TOP_CENTER"/>
+                        <lookupField id="taxiVendorLookupField" caption="Car brand" required="true"
+                                     nullOptionVisible="false" align="TOP_CENTER"/>
+                        <lookupField id="taxiModelLookupField" caption="Car model" required="true"
+                                     nullOptionVisible="false" align="TOP_CENTER"/>
+                        <lookupField id="taxiColorLookupField" caption="Color" required="true"
+                                     nullOptionVisible="false" align="TOP_CENTER"/>
+                        <textField id="taxiNumberField" caption="Number" required="true" align="TOP_CENTER"/>
+                        <hbox spacing="true" align="TOP_CENTER">
+                            <button id="taxiRegOkButton" caption="Ok" icon="OK" invoke="onTaxiRegOkButtonClick"/>
+                            <button id="taxiRegCancelButton" icon="CANCEL" caption="Cancel"
+                                    invoke="onTaxiRegCancelButtonClick"/>
+                        </hbox>
+                    </scrollBox>
+                </vbox>
+                <hbox id="taxiConnectRegisterPanel" spacing="true" align="BOTTOM_CENTER">
+                    <button id="taxiConnectButton" invoke="onTaxiConnectClick" icon="USER" caption="Login"/>
+                    <button id="taxiRegisterButton" caption="Register" invoke="onTaxiRegisterButtonClick"
+                            icon="USER_PLUS"/>
+                </hbox>
+                <hbox id="taxiWaitingForClientPanel" spacing="true" visible="false" align="TOP_CENTER">
+                    <label value="Waiting for client order..." align="TOP_CENTER"/>
+                </hbox>
+                <vbox id="taxiClientOrderPanel" spacing="true" align="TOP_CENTER" visible="false">
+                    <label id="taxiClientOrderDesc" align="TOP_CENTER"/>
+                    <label id="taxiClientOrderPrice" align="TOP_CENTER"/>
+                    <label id="taxiWaitForTripEnd" visible="false" value="Please wait for the trip end..."
+                           align="TOP_CENTER"/>
+                    <hbox id="taxiTripStartCancelPanel" spacing="true" align="TOP_CENTER">
+                        <button id="taxiStartTripButton" caption="Start trip" invoke="onTaxiStartTripButtonClick"/>
+                        <button id="taxiCancelOrderButton" caption="Cancel" invoke="onTaxiCancelOrderButtonClick"/>
+                    </hbox>
+                    <hbox id="taxiClientOrderButtonsPanel" spacing="true" align="TOP_CENTER">
+                        <button id="taxiTakeOrder" caption="Take order" invoke="onTaxiTakeOrderClick"/>
+                        <button id="taxiIgnoreOrder" invoke="onTaxiIgnoreOrderClick" caption="Ignore"/>
+                    </hbox>
+                </vbox>
+            </vbox>
+        </hbox>
     </layout>
 </window>
